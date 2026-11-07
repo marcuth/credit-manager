@@ -59,4 +59,4 @@ O fluxo atravessa vários arquivos; os pontos que não são óbvios lendo um só
 
 ## Pendências conhecidas
 
-Compatibilidade com Windows antigo (o Rust atual não compila para Windows 7/XP). As integrações com Mercado Pago, WhatsApp, Telegram e Google Drive nunca foram exercitadas contra os serviços reais; só a lógica de apoio tem teste.
+O alvo é o Windows 10, inclusive 32 bits (`i686-pc-windows-msvc`); Windows 7/XP não é alvo. A interface usa OpenGL (eframe/glow): num PC muito antigo sem driver de vídeo adequado a janela pode não abrir. As integrações com Mercado Pago, WhatsApp, Telegram e Google Drive nunca foram exercitadas contra os serviços reais; só a lógica de apoio tem teste.

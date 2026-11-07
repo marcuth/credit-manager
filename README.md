@@ -17,7 +17,6 @@ Em desenvolvimento. O que existe hoje:
 O que **ainda não existe**:
 
 - Criptografia do arquivo do banco em si (só os tokens e os backups enviados à nuvem são criptografados).
-- Compatibilidade com Windows antigo: o Rust atual não compila para Windows 7/XP.
 
 As integrações com o Mercado Pago, o WhatsApp, o Telegram e o Google Drive compilam e têm a lógica de apoio testada, mas **ainda não foram exercitadas contra os serviços reais**. Trate-as como experimentais.
 
@@ -92,6 +91,8 @@ Para restaurar num computador novo, conecte o Drive, baixe o backup pela lista e
 ## Compilando
 
 Requisitos: [Rust](https://rustup.rs) 1.94 ou superior (edição 2024) e, no Windows, as ferramentas de build do Visual Studio (MSVC).
+
+O alvo é o **Windows 10**. Para um computador de 32 bits, instale o alvo e compile com ele: `rustup target add i686-pc-windows-msvc` e `cargo build --release --target i686-pc-windows-msvc` (o executável sai em `target\i686-pc-windows-msvcelease\`). O Windows 7/XP não é suportado pelo Rust atual.
 
 ```bash
 cargo run                 # executa em modo debug
