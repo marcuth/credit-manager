@@ -1,31 +1,17 @@
-use super::{View, customer_combo};
+use super::View;
+use super::dialogs::{Outcome, TransactionForm};
 use crate::db::{Customer, Kind, TransactionEntry};
-use crate::money::{format_cents, parse_cents};
+use crate::money::format_cents;
 use crate::services::Services;
 use eframe::egui::{self, Color32, RichText};
+use egui_phosphor::regular as icon;
 
+#[derive(Default)]
 pub struct TransactionsView {
     revision: Option<u64>,
     customers: Vec<Customer>,
     entries: Vec<TransactionEntry>,
-    customer: Option<i64>,
-    kind: Kind,
-    amount: String,
-    note: String,
-}
-
-impl Default for TransactionsView {
-    fn default() -> Self {
-        Self {
-            revision: None,
-            customers: vec![],
-            entries: vec![],
-            customer: None,
-            kind: Kind::Debt,
-            amount: String::new(),
-            note: String::new(),
-        }
-    }
+    form: Option<TransactionForm>,
 }
 
 impl View for TransactionsView {
@@ -36,32 +22,11 @@ impl View for TransactionsView {
             self.revision = Some(sv.revision);
         }
 
-        ui.heading("Transações");
-        ui.add_space(8.0);
-        ui.group(|ui| {
-            ui.label(RichText::new("Nova transação").strong());
-            ui.horizontal_wrapped(|ui| {
-                customer_combo(ui, "tx_customer", &self.customers, &mut self.customer);
-                ui.radio_value(&mut self.kind, Kind::Debt, "Dívida (débito)");
-                ui.radio_value(&mut self.kind, Kind::Payment, "Pagamento (crédito)");
-            });
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.amount).hint_text("Valor, ex: 25,50").desired_width(140.0));
-                ui.add(egui::TextEdit::singleline(&mut self.note).hint_text("Anotação (opcional)").desired_width(260.0));
-                if ui.button("Adicionar").clicked() {
-                    match (self.customer, parse_cents(&self.amount).filter(|c| *c > 0)) {
-                        (None, _) => sv.notify("Escolha um cliente."),
-                        (_, None) => sv.notify("Valor inválido."),
-                        (Some(id), Some(cents)) => match sv.db.add_transaction(id, self.kind, cents, &self.note) {
-                            Ok(()) => {
-                                self.amount.clear();
-                                self.note.clear();
-                                sv.changed();
-                                sv.notify("Transação registrada.");
-                            }
-                            Err(e) => sv.notify(e.to_string()),
-                        },
-                    }
+        ui.horizontal(|ui| {
+            ui.heading(format!("{}  Transações", icon::ARROWS_LEFT_RIGHT));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(format!("{}  Nova transação", icon::PLUS)).clicked() {
+                    self.form = Some(TransactionForm::new(Kind::Debt));
                 }
             });
         });
@@ -74,18 +39,25 @@ impl View for TransactionsView {
                 }
                 ui.end_row();
                 for e in &self.entries {
-                    let (label, color, sign) = match e.tx.kind {
-                        Kind::Debt => ("Dívida", Color32::from_rgb(200, 60, 60), "+"),
-                        Kind::Payment => ("Pagamento", Color32::from_rgb(40, 150, 80), "-"),
+                    let (label, glyph, color, sign) = match e.tx.kind {
+                        Kind::Debt => ("Dívida", icon::ARROW_UP, Color32::from_rgb(200, 60, 60), "+"),
+                        Kind::Payment => ("Pagamento", icon::ARROW_DOWN, Color32::from_rgb(40, 150, 80), "-"),
                     };
                     ui.label(&e.tx.created_at);
                     ui.label(&e.customer_name);
-                    ui.label(RichText::new(label).color(color));
+                    ui.label(RichText::new(format!("{glyph} {label}")).color(color));
                     ui.label(RichText::new(format!("{sign} {}", format_cents(e.tx.amount_cents))).color(color));
                     ui.label(&e.tx.note);
                     ui.end_row();
                 }
             });
         });
+
+        if let Some(form) = &mut self.form {
+            let ctx = ui.ctx().clone();
+            if form.show(&ctx, sv, &self.customers) != Outcome::Open {
+                self.form = None;
+            }
+        }
     }
 }

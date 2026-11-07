@@ -1,8 +1,10 @@
 use super::View;
+use super::dialogs::{CustomerForm, Outcome, TransactionForm};
 use crate::db::{Customer, Kind, Transaction};
-use crate::money::{format_cents, parse_cents};
+use crate::money::format_cents;
 use crate::services::Services;
 use eframe::egui::{self, Color32, RichText};
+use egui_phosphor::regular as icon;
 
 #[derive(Default)]
 pub struct CustomersView {
@@ -11,13 +13,8 @@ pub struct CustomersView {
     customers: Vec<Customer>,
     selected: Option<i64>,
     history: Vec<Transaction>,
-    // formulário de novo cliente
-    new_name: String,
-    new_phone: String,
-    new_email: String,
-    // formulário de transação do cliente selecionado
-    amount: String,
-    note: String,
+    customer_form: Option<CustomerForm>,
+    tx_form: Option<TransactionForm>,
 }
 
 impl CustomersView {
@@ -42,30 +39,11 @@ impl View for CustomersView {
             self.reload(sv);
         }
 
-        ui.heading("Clientes");
-        ui.add_space(8.0);
-        ui.group(|ui| {
-            ui.label(RichText::new("Novo cliente").strong());
-            ui.horizontal_wrapped(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.new_name).hint_text("Nome").desired_width(200.0));
-                ui.add(egui::TextEdit::singleline(&mut self.new_phone).hint_text("Celular com DDD").desired_width(150.0));
-                ui.add(egui::TextEdit::singleline(&mut self.new_email).hint_text("E-mail").desired_width(200.0));
-                if ui.button("Cadastrar").clicked() {
-                    if self.new_name.trim().is_empty() {
-                        sv.notify("Informe o nome do cliente.");
-                    } else {
-                        match sv.db.add_customer(&self.new_name, &self.new_phone, &self.new_email) {
-                            Ok(id) => {
-                                self.selected = Some(id);
-                                self.new_name.clear();
-                                self.new_phone.clear();
-                                self.new_email.clear();
-                                sv.changed();
-                                sv.notify("Cliente cadastrado.");
-                            }
-                            Err(e) => sv.notify(e.to_string()),
-                        }
-                    }
+        ui.horizontal(|ui| {
+            ui.heading(format!("{}  Clientes", icon::USERS));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(format!("{}  Novo cliente", icon::USER_PLUS)).clicked() {
+                    self.customer_form = Some(CustomerForm::default());
                 }
             });
         });
@@ -74,10 +52,10 @@ impl View for CustomersView {
         ui.columns(2, |cols| {
             // Lista
             let ui = &mut cols[0];
-            if ui
-                .add(egui::TextEdit::singleline(&mut self.search).hint_text("Buscar por nome").desired_width(f32::INFINITY))
-                .changed()
-            {
+            let search = egui::TextEdit::singleline(&mut self.search)
+                .hint_text(format!("{}  Buscar por nome", icon::MAGNIFYING_GLASS))
+                .desired_width(f32::INFINITY);
+            if ui.add(search).changed() {
                 self.reload(sv);
             }
             egui::ScrollArea::vertical().id_salt("customers").auto_shrink(false).show(ui, |ui| {
@@ -85,7 +63,7 @@ impl View for CustomersView {
                 for c in &self.customers {
                     let selected = self.selected == Some(c.id);
                     ui.horizontal(|ui| {
-                        if ui.selectable_label(selected, &c.name).clicked() {
+                        if ui.selectable_label(selected, format!("{}  {}", icon::USER, c.name)).clicked() {
                             clicked = Some(c.id);
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -106,13 +84,19 @@ impl View for CustomersView {
                 return;
             };
             ui.label(RichText::new(&c.name).heading());
-            ui.label(format!("Celular: {}   E-mail: {}", or_dash(&c.phone), or_dash(&c.email)));
+            ui.label(format!("{} {}    {} {}", icon::PHONE, or_dash(&c.phone), icon::ENVELOPE_SIMPLE, or_dash(&c.email)));
             ui.label(balance_text(c.balance_cents).size(18.0));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                if ui.button(format!("{}  Adicionar dívida", icon::ARROW_UP)).clicked() {
+                    self.tx_form = Some(TransactionForm::for_customer(c.id, Kind::Debt));
+                }
+                if ui.button(format!("{}  Adicionar pagamento", icon::ARROW_DOWN)).clicked() {
+                    self.tx_form = Some(TransactionForm::for_customer(c.id, Kind::Payment));
+                }
                 if c.telegram_chat_id.is_some() {
-                    ui.colored_label(Color32::from_rgb(40, 150, 80), "Telegram vinculado");
+                    ui.colored_label(Color32::from_rgb(40, 150, 80), format!("{}  Telegram vinculado", icon::CHECK_CIRCLE));
                 } else if let Some(bot) = sv.channels.telegram.username() {
-                    if ui.button("Copiar link do Telegram").clicked() {
+                    if ui.button(format!("{}  Copiar link do Telegram", icon::TELEGRAM_LOGO)).clicked() {
                         match sv.db.ensure_telegram_link_code(c.id) {
                             Ok(code) => {
                                 ui.ctx().copy_text(format!("https://t.me/{bot}?start={code}"));
@@ -122,46 +106,42 @@ impl View for CustomersView {
                         }
                     }
                 } else {
-                    ui.label("Telegram: configure o bot na tela Canais.");
-                }
-            });
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.amount).hint_text("Valor").desired_width(100.0));
-                ui.add(egui::TextEdit::singleline(&mut self.note).hint_text("Anotação").desired_width(160.0));
-            });
-            ui.horizontal(|ui| {
-                for (label, kind) in [("Adicionar dívida", Kind::Debt), ("Adicionar pagamento", Kind::Payment)] {
-                    if ui.button(label).clicked() {
-                        match parse_cents(&self.amount).filter(|v| *v > 0) {
-                            None => sv.notify("Valor inválido."),
-                            Some(cents) => match sv.db.add_transaction(c.id, kind, cents, &self.note) {
-                                Ok(()) => {
-                                    self.amount.clear();
-                                    self.note.clear();
-                                    sv.changed();
-                                }
-                                Err(e) => sv.notify(e.to_string()),
-                            },
-                        }
-                    }
+                    ui.label(format!("{}  Telegram: configure o bot em Canais.", icon::TELEGRAM_LOGO));
                 }
             });
             ui.separator();
             egui::ScrollArea::vertical().id_salt("history").auto_shrink(false).show(ui, |ui| {
                 for t in &self.history {
-                    let (label, color, sign) = match t.kind {
-                        Kind::Debt => ("Dívida", Color32::from_rgb(200, 60, 60), "+"),
-                        Kind::Payment => ("Pagamento", Color32::from_rgb(40, 150, 80), "-"),
+                    let (label, glyph, color, sign) = match t.kind {
+                        Kind::Debt => ("Dívida", icon::ARROW_UP, Color32::from_rgb(200, 60, 60), "+"),
+                        Kind::Payment => ("Pagamento", icon::ARROW_DOWN, Color32::from_rgb(40, 150, 80), "-"),
                     };
                     ui.horizontal(|ui| {
                         ui.label(&t.created_at);
-                        ui.label(RichText::new(format!("{label} {sign} {}", format_cents(t.amount_cents))).color(color));
+                        ui.label(RichText::new(format!("{glyph} {label} {sign} {}", format_cents(t.amount_cents))).color(color));
                         ui.label(&t.note);
                     });
                 }
             });
         });
+
+        let ctx = ui.ctx().clone();
+        if let Some(form) = &mut self.customer_form {
+            match form.show(&ctx, sv) {
+                Outcome::Open => {}
+                outcome => {
+                    if outcome == Outcome::Saved {
+                        self.selected = form.created_id;
+                    }
+                    self.customer_form = None;
+                }
+            }
+        }
+        if let Some(form) = &mut self.tx_form
+            && form.show(&ctx, sv, &self.customers) != Outcome::Open
+        {
+            self.tx_form = None;
+        }
     }
 }
 
