@@ -1,11 +1,16 @@
 use rusqlite::{Connection, params};
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
     #[error("erro no banco de dados: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("{0}")]
+    Invalid(String),
 }
+
+/// Versão do esquema que este programa entende (`PRAGMA user_version`).
+const SCHEMA_VERSION: i64 = 4;
 
 pub type Result<T> = std::result::Result<T, DbError>;
 
@@ -17,8 +22,6 @@ pub struct Customer {
     pub email: String,
     /// Positivo = cliente deve. Negativo = cliente tem crédito.
     pub balance_cents: i64,
-    /// Preenchido quando o cliente vincula o Telegram pelo link do bot.
-    pub telegram_chat_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -61,17 +64,6 @@ impl Kind {
             Kind::Payment => "payment",
         }
     }
-}
-
-fn random_code() -> String {
-    use std::hash::{BuildHasher, Hasher, RandomState};
-    (0..2)
-        .map(|_| {
-            let mut h = RandomState::new().build_hasher();
-            h.write_u8(0);
-            format!("{:016x}", h.finish())
-        })
-        .collect()
 }
 
 pub struct Db {
@@ -151,6 +143,16 @@ impl Db {
                  COMMIT;",
             )?;
         }
+        if version < 4 {
+            // O Telegram agora usa a conta do usuário (pelo telefone): sem vínculo por bot.
+            self.conn.execute_batch(
+                "BEGIN;
+                 ALTER TABLE customers DROP COLUMN telegram_chat_id;
+                 ALTER TABLE customers DROP COLUMN telegram_link_code;
+                 PRAGMA user_version = 4;
+                 COMMIT;",
+            )?;
+        }
         Ok(())
     }
 
@@ -167,8 +169,7 @@ impl Db {
         let mut stmt = self.conn.prepare(
             "SELECT c.id, c.name, c.phone, c.email,
                     COALESCE(SUM(CASE t.kind WHEN 'debt' THEN t.amount_cents
-                                             ELSE -t.amount_cents END), 0) AS balance,
-                    c.telegram_chat_id
+                                             ELSE -t.amount_cents END), 0) AS balance
              FROM customers c LEFT JOIN transactions t ON t.customer_id = c.id
              WHERE c.archived = 0 AND c.name LIKE ?1
              GROUP BY c.id
@@ -181,7 +182,6 @@ impl Db {
                 phone: r.get(2)?,
                 email: r.get(3)?,
                 balance_cents: r.get(4)?,
-                telegram_chat_id: r.get(5)?,
             })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
@@ -195,33 +195,69 @@ impl Db {
         Ok(())
     }
 
-    /// Código aleatório e imprevisível que o cliente envia ao bot (`/start <código>`)
-    /// para vincular o Telegram dele. Não usamos o id do cliente para ninguém
-    /// poder se passar por outro cliente.
-    pub fn ensure_telegram_link_code(&self, customer_id: i64) -> Result<String> {
-        let existing: Option<String> = self.conn.query_row(
-            "SELECT telegram_link_code FROM customers WHERE id = ?1",
-            [customer_id],
-            |r| r.get(0),
-        )?;
-        if let Some(code) = existing {
-            return Ok(code);
-        }
-        let code = random_code();
-        self.conn.execute(
-            "UPDATE customers SET telegram_link_code = ?2 WHERE id = ?1",
-            params![customer_id, code],
-        )?;
-        Ok(code)
+    pub fn all_settings(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare("SELECT key, value FROM settings")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
-    /// Vincula o chat do Telegram ao cliente dono do código. `false` se o código não existe.
-    pub fn link_telegram(&self, code: &str, chat_id: i64) -> Result<bool> {
-        let n = self.conn.execute(
-            "UPDATE customers SET telegram_chat_id = ?2 WHERE telegram_link_code = ?1",
-            params![code, chat_id.to_string()],
+    /// Grava uma cópia consistente do banco em `path` (funciona com o app em uso).
+    /// Com `include_settings = false` a cópia sai sem as configurações (tokens e senha).
+    pub fn snapshot_to(&self, path: &Path, include_settings: bool) -> Result<()> {
+        let _ = std::fs::remove_file(path);
+        self.conn.execute("VACUUM INTO ?1", [path.to_string_lossy().as_ref()])?;
+        if !include_settings {
+            let copy = Connection::open(path)?;
+            copy.execute("DELETE FROM settings", [])?;
+            copy.execute_batch("VACUUM")?;
+        }
+        Ok(())
+    }
+
+    /// Confere se `path` é um banco deste sistema, íntegro e de versão que conhecemos.
+    pub fn validate_backup(path: &Path) -> Result<()> {
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|_| DbError::Invalid("o arquivo não é um backup válido".into()))?;
+        let check: String = conn
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .map_err(|_| DbError::Invalid("o arquivo não é um backup válido".into()))?;
+        if check != "ok" {
+            return Err(DbError::Invalid("o backup está corrompido".into()));
+        }
+        let tables: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('customers','transactions')",
+            [],
+            |r| r.get(0),
         )?;
-        Ok(n > 0)
+        if tables != 2 {
+            return Err(DbError::Invalid("o arquivo não é um backup deste sistema".into()));
+        }
+        let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version > SCHEMA_VERSION {
+            return Err(DbError::Invalid("o backup foi feito por uma versão mais nova do sistema".into()));
+        }
+        Ok(())
+    }
+
+    /// Substitui os dados (clientes, transações, cobranças) pelos do backup `path`.
+    /// As configurações atuais (senha, tokens) são mantidas.
+    pub fn restore_from(&mut self, path: &Path) -> Result<()> {
+        Self::validate_backup(path)?;
+        let settings = self.all_settings()?;
+        {
+            let source = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let backup = rusqlite::backup::Backup::new(&source, &mut self.conn)?;
+            backup.run_to_completion(64, Duration::ZERO, None)?;
+        }
+        // O backup pode ser de uma versão anterior do esquema.
+        self.migrate()?;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM settings", [])?;
+        for (key, value) in settings {
+            tx.execute("INSERT INTO settings (key, value) VALUES (?1, ?2)", params![key, value])?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
@@ -364,16 +400,65 @@ mod tests {
         assert!(db.pending_charges().unwrap().is_empty());
     }
 
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("credit-manager-test-{name}-{}.db", std::process::id()))
+    }
+
     #[test]
-    fn telegram_link_flow() {
+    fn snapshot_excludes_settings_when_asked() {
         let db = Db::open_in_memory().unwrap();
+        db.add_customer("Ana", "", "").unwrap();
+        db.set_setting("mp_access_token", "segredo").unwrap();
+        let (with, without) = (temp_path("snap-with"), temp_path("snap-without"));
+        db.snapshot_to(&with, true).unwrap();
+        db.snapshot_to(&without, false).unwrap();
+        for (path, expected) in [(&with, 1), (&without, 0)] {
+            let c = Connection::open(path).unwrap();
+            let n: i64 = c.query_row("SELECT COUNT(*) FROM settings", [], |r| r.get(0)).unwrap();
+            assert_eq!(n, expected);
+            let customers: i64 = c.query_row("SELECT COUNT(*) FROM customers", [], |r| r.get(0)).unwrap();
+            assert_eq!(customers, 1);
+        }
+        let _ = std::fs::remove_file(with);
+        let _ = std::fs::remove_file(without);
+    }
+
+    #[test]
+    fn restore_replaces_data_but_keeps_current_settings() {
+        let mut db = Db::open_in_memory().unwrap();
         let id = db.add_customer("Ana", "", "").unwrap();
-        let code = db.ensure_telegram_link_code(id).unwrap();
-        assert_eq!(code.len(), 32);
-        assert_eq!(code, db.ensure_telegram_link_code(id).unwrap());
-        assert!(!db.link_telegram("errado", 42).unwrap());
-        assert!(db.link_telegram(&code, 42).unwrap());
-        assert_eq!(db.list_customers("").unwrap()[0].telegram_chat_id.as_deref(), Some("42"));
+        db.add_transaction(id, Kind::Debt, 1000, "").unwrap();
+        let backup = temp_path("restore");
+        db.snapshot_to(&backup, false).unwrap();
+
+        // Depois do backup: muda os dados e a configuração.
+        let other = db.add_customer("Bia", "", "").unwrap();
+        db.add_transaction(other, Kind::Debt, 5000, "").unwrap();
+        db.set_setting("vault_salt", "salt-atual").unwrap();
+
+        db.restore_from(&backup).unwrap();
+        let customers = db.list_customers("").unwrap();
+        assert_eq!(customers.len(), 1);
+        assert_eq!(customers[0].name, "Ana");
+        assert_eq!(customers[0].balance_cents, 1000);
+        assert_eq!(db.get_setting("vault_salt").unwrap().as_deref(), Some("salt-atual"));
+        let _ = std::fs::remove_file(backup);
+    }
+
+    #[test]
+    fn rejects_files_that_are_not_backups() {
+        let garbage = temp_path("garbage");
+        std::fs::write(&garbage, b"isto nao e um banco sqlite, so texto qualquer").unwrap();
+        assert!(Db::validate_backup(&garbage).is_err());
+        assert!(Db::validate_backup(Path::new("nao-existe.db")).is_err());
+
+        let other = temp_path("other-db");
+        let c = Connection::open(&other).unwrap();
+        c.execute_batch("CREATE TABLE coisa (x INTEGER)").unwrap();
+        drop(c);
+        assert!(matches!(Db::validate_backup(&other), Err(DbError::Invalid(_))));
+        let _ = std::fs::remove_file(garbage);
+        let _ = std::fs::remove_file(other);
     }
 
     #[test]
