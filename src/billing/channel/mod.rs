@@ -63,7 +63,6 @@ impl ChannelKind {
 }
 
 pub trait MessageChannel: Send + Sync {
-    fn kind(&self) -> ChannelKind;
     fn status(&self) -> ChannelStatus;
     fn can_reach(&self, customer: &Customer) -> bool;
     /// Bloqueante: chame de uma thread de trabalho, nunca da thread da interface.

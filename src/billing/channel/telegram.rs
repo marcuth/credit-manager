@@ -1,4 +1,4 @@
-use super::{ChannelError, ChannelKind, ChannelStatus, MessageChannel};
+use super::{ChannelError, ChannelStatus, MessageChannel};
 use crate::db::Customer;
 use crate::services::Event;
 use serde_json::{Value, json};
@@ -146,10 +146,6 @@ fn poll_loop(state: Arc<Mutex<State>>, token: String, stop: Arc<AtomicBool>, eve
 }
 
 impl MessageChannel for TelegramChannel {
-    fn kind(&self) -> ChannelKind {
-        ChannelKind::Telegram
-    }
-
     fn status(&self) -> ChannelStatus {
         self.state.lock().unwrap().status.clone()
     }

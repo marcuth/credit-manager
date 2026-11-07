@@ -1,4 +1,4 @@
-use super::{ChannelError, ChannelKind, ChannelStatus, MessageChannel, whatsapp_number};
+use super::{ChannelError, ChannelStatus, MessageChannel, whatsapp_number};
 use crate::db::Customer;
 use std::{
     path::PathBuf,
@@ -141,10 +141,6 @@ impl Drop for WhatsAppChannel {
 }
 
 impl MessageChannel for WhatsAppChannel {
-    fn kind(&self) -> ChannelKind {
-        ChannelKind::WhatsApp
-    }
-
     fn status(&self) -> ChannelStatus {
         self.shared.lock().unwrap().status.clone().unwrap_or(ChannelStatus::Disconnected)
     }
