@@ -1,9 +1,10 @@
 use super::View;
+use super::theme::{self, Btn};
 use super::dialogs::{Outcome, TransactionForm};
 use crate::db::{Customer, Kind, TransactionEntry};
 use crate::money::format_cents;
 use crate::services::Services;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use egui_phosphor::regular as icon;
 
 #[derive(Default)]
@@ -25,7 +26,7 @@ impl View for TransactionsView {
         ui.horizontal(|ui| {
             ui.heading(format!("{}  Transações", icon::ARROWS_LEFT_RIGHT));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(format!("{}  Nova transação", icon::PLUS)).clicked() {
+                if ui.add(Btn::primary(format!("{}  Nova transação", icon::PLUS))).clicked() {
                     self.form = Some(TransactionForm::new(Kind::Debt));
                 }
             });
@@ -40,8 +41,8 @@ impl View for TransactionsView {
                 ui.end_row();
                 for e in &self.entries {
                     let (label, glyph, color, sign) = match e.tx.kind {
-                        Kind::Debt => ("Dívida", icon::ARROW_UP, Color32::from_rgb(200, 60, 60), "+"),
-                        Kind::Payment => ("Pagamento", icon::ARROW_DOWN, Color32::from_rgb(40, 150, 80), "-"),
+                        Kind::Debt => ("Dívida", icon::ARROW_UP, theme::DANGER, "+"),
+                        Kind::Payment => ("Pagamento", icon::ARROW_DOWN, theme::SUCCESS, "-"),
                     };
                     ui.label(&e.tx.created_at);
                     ui.label(&e.customer_name);

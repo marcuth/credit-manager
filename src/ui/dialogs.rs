@@ -1,13 +1,12 @@
 //! Diálogos modais reutilizáveis e os formulários de cadastro compartilhados pelas telas.
 
-use super::{customer_combo, enlarge_controls};
+use super::customer_combo;
+use super::theme::{self, Btn};
 use crate::db::{Customer, Kind};
 use crate::money::parse_cents;
 use crate::services::Services;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use egui_phosphor::regular as icon;
-
-pub const RED: Color32 = Color32::from_rgb(200, 60, 60);
 
 pub enum DialogAction {
     None,
@@ -33,31 +32,33 @@ pub fn form_dialog(
     error: Option<&str>,
     body: impl FnOnce(&mut egui::Ui),
 ) -> DialogAction {
-    let resp = egui::Modal::new(egui::Id::unique(id)).show(ctx, |ui| {
-        enlarge_controls(ui.style_mut());
-        ui.set_width(440.0);
-        ui.heading(title);
-        ui.add_space(8.0);
-        body(ui);
-        if let Some(e) = error {
-            ui.add_space(4.0);
-            ui.label(RichText::new(format!("{}  {e}", icon::WARNING)).color(RED));
-        }
-        ui.add_space(10.0);
-        let mut action = DialogAction::None;
-        ui.horizontal(|ui| {
-            if ui.button(format!("{}  {submit_label}", icon::CHECK)).clicked() {
+    let resp = egui::Modal::new(egui::Id::unique(id))
+        .frame(theme::modal_frame())
+        .backdrop_color(theme::SCRIM)
+        .show(ctx, |ui| {
+            ui.set_width(440.0);
+            ui.label(theme::title(title));
+            ui.add_space(8.0);
+            body(ui);
+            if let Some(e) = error {
+                ui.add_space(4.0);
+                ui.label(RichText::new(format!("{}  {e}", icon::WARNING)).color(theme::DANGER));
+            }
+            ui.add_space(10.0);
+            let mut action = DialogAction::None;
+            ui.horizontal(|ui| {
+                if ui.add(Btn::primary(format!("{}  {submit_label}", icon::CHECK))).clicked() {
+                    action = DialogAction::Submit;
+                }
+                if ui.add(Btn::secondary(format!("{}  Cancelar", icon::X))).clicked() {
+                    action = DialogAction::Cancel;
+                }
+            });
+            if matches!(action, DialogAction::None) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 action = DialogAction::Submit;
             }
-            if ui.button(format!("{}  Cancelar", icon::X)).clicked() {
-                action = DialogAction::Cancel;
-            }
+            action
         });
-        if matches!(action, DialogAction::None) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            action = DialogAction::Submit;
-        }
-        action
-    });
     match resp.inner {
         DialogAction::None if resp.should_close() => DialogAction::Cancel,
         other => other,
@@ -66,7 +67,7 @@ pub fn form_dialog(
 
 /// Campo de texto com rótulo, ocupando toda a largura do diálogo.
 pub fn field(ui: &mut egui::Ui, label: &str, value: &mut String, hint: &str, password: bool) -> egui::Response {
-    ui.label(label);
+    ui.label(theme::dim(label));
     let r = ui.add(
         egui::TextEdit::singleline(value).hint_text(hint).password(password).desired_width(f32::INFINITY),
     );
@@ -77,12 +78,12 @@ pub fn field(ui: &mut egui::Ui, label: &str, value: &mut String, hint: &str, pas
 /// Campo para segredos (tokens) com botão de mostrar/ocultar. Quando `reveal` é `false`
 /// o texto fica mascarado.
 pub fn secret_field(ui: &mut egui::Ui, label: &str, value: &mut String, hint: &str, reveal: &mut bool) {
-    ui.label(label);
+    ui.label(theme::dim(label));
     ui.horizontal(|ui| {
         let width = (ui.available_width() - 64.0).max(120.0);
         ui.add(egui::TextEdit::singleline(value).hint_text(hint).password(!*reveal).desired_width(width));
         let (glyph, tip) = if *reveal { (icon::EYE_SLASH, "Ocultar") } else { (icon::EYE, "Mostrar") };
-        if ui.button(glyph).on_hover_text(tip).clicked() {
+        if ui.add(Btn::secondary(glyph).min_width(40.0)).on_hover_text(tip).clicked() {
             *reveal = !*reveal;
         }
     });
@@ -164,12 +165,16 @@ impl TransactionForm {
         };
         let action = form_dialog(ctx, "transaction_form", &title, "Salvar", self.error.as_deref(), |ui| {
             if self.choose_customer {
-                ui.label("Cliente");
+                ui.label(theme::dim("Cliente"));
                 customer_combo(ui, "tx_form_customer", customers, &mut self.customer);
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    ui.radio_value(&mut self.kind, Kind::Debt, format!("{}  Dívida", icon::ARROW_UP));
-                    ui.radio_value(&mut self.kind, Kind::Payment, format!("{}  Pagamento", icon::ARROW_DOWN));
+                    if theme::pill_tab(ui, self.kind == Kind::Debt, format!("{}  Dívida", icon::ARROW_UP)).clicked() {
+                        self.kind = Kind::Debt;
+                    }
+                    if theme::pill_tab(ui, self.kind == Kind::Payment, format!("{}  Pagamento", icon::ARROW_DOWN)).clicked() {
+                        self.kind = Kind::Payment;
+                    }
                 });
                 ui.add_space(6.0);
             } else if let Some(c) = customers.iter().find(|c| Some(c.id) == self.customer) {

@@ -1,4 +1,5 @@
-use super::dialogs::{DialogAction, Outcome, RED, field, form_dialog, secret_field};
+use super::dialogs::{DialogAction, Outcome, field, form_dialog, secret_field};
+use super::theme::{self, Btn, Tone};
 use super::{View, customer_combo};
 use crate::billing::{
     CheckoutRequest,
@@ -103,7 +104,7 @@ impl ProviderForm {
     fn load(sv: &Services) -> Self {
         Self {
             kind: ProviderKind::from_key(&sv.db.get_setting("provider").ok().flatten().unwrap_or_default()),
-            token: sv.db.get_setting("mp_access_token").ok().flatten().unwrap_or_default(),
+            token: sv.secret("mp_access_token"),
             reveal: true,
             error: None,
         }
@@ -134,7 +135,7 @@ impl ProviderForm {
             DialogAction::Cancel => Outcome::Cancelled,
             DialogAction::Submit => {
                 let r1 = sv.db.set_setting("provider", self.kind.key());
-                let r2 = sv.db.set_setting("mp_access_token", self.token.trim());
+                let r2 = sv.set_secret("mp_access_token", self.token.trim());
                 sv.reload_provider();
                 match (r1, r2, &sv.provider) {
                     (Err(e), ..) | (_, Err(e), _) => self.error = Some(e.to_string()),
@@ -164,24 +165,24 @@ impl View for BillingView {
         ui.horizontal(|ui| {
             ui.heading(format!("{}  Cobrança automática", icon::RECEIPT));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(format!("{}  Provedor", icon::GEAR)).clicked() {
+                if ui.add(Btn::secondary(format!("{}  Provedor", icon::GEAR))).clicked() {
                     self.provider_form = Some(ProviderForm::load(sv));
                 }
                 let ready = sv.provider.is_ok();
-                if ui.add_enabled(ready, egui::Button::new(format!("{}  Nova cobrança", icon::PLUS))).clicked() {
+                if ui.add_enabled(ready, Btn::primary(format!("{}  Nova cobrança", icon::PLUS))).clicked() {
                     self.charge_form = Some(ChargeForm { customer: None, amount: String::new(), error: None });
                 }
             });
         });
         if let Err(e) = &sv.provider {
-            ui.label(RichText::new(format!("{}  {e}. Use o botão Provedor.", icon::WARNING)).color(RED));
+            ui.label(RichText::new(format!("{}  {e}. Use o botão Provedor.", icon::WARNING)).color(theme::DANGER));
         }
         ui.add_space(8.0);
 
         ui.horizontal(|ui| {
             ui.label(RichText::new("Cobranças").strong());
             if ui
-                .add_enabled(sv.provider.is_ok(), egui::Button::new(format!("{}  Verificar pagamentos agora", icon::ARROWS_CLOCKWISE)))
+                .add_enabled(sv.provider.is_ok(), Btn::secondary(format!("{}  Verificar pagamentos agora", icon::ARROWS_CLOCKWISE)))
                 .clicked()
             {
                 sv.check_pending();
@@ -196,14 +197,14 @@ impl View for BillingView {
                     ui.label(format!("{}  {}", icon::USER, ch.customer_name));
                     ui.label(format_cents(ch.amount_cents));
                     if ch.paid {
-                        ui.colored_label(egui::Color32::from_rgb(40, 150, 80), format!("{}  Pago", icon::CHECK_CIRCLE));
+                        theme::badge(ui, format!("{}  Pago", icon::CHECK_CIRCLE), Tone::Success);
                         return;
                     }
-                    ui.colored_label(egui::Color32::from_rgb(200, 140, 0), format!("{}  Aguardando", icon::CLOCK));
-                    if ui.button(format!("{}  Abrir", icon::ARROW_SQUARE_OUT)).clicked() {
+                    theme::badge(ui, format!("{}  Aguardando", icon::CLOCK), Tone::Warning);
+                    if ui.add(Btn::secondary(format!("{}  Abrir", icon::ARROW_SQUARE_OUT)).compact()).clicked() {
                         ui.ctx().open_url(egui::OpenUrl::new_tab(&ch.url));
                     }
-                    if ui.button(format!("{}  Copiar link", icon::COPY)).clicked() {
+                    if ui.add(Btn::secondary(format!("{}  Copiar link", icon::COPY)).compact()).clicked() {
                         ui.ctx().copy_text(ch.url.clone());
                         sv.notify("Link copiado.");
                     }
@@ -217,7 +218,7 @@ impl View for BillingView {
                                 ChannelKind::Telegram => icon::TELEGRAM_LOGO,
                             };
                             let resp = ui
-                                .add_enabled(ready && channel.can_reach(customer), egui::Button::new(format!("{glyph}  Enviar por {}", kind.label())))
+                                .add_enabled(ready && channel.can_reach(customer), Btn::secondary(format!("{glyph}  Enviar por {}", kind.label())).compact())
                                 .on_disabled_hover_text(hint);
                             if resp.clicked() {
                                 let text = charge_message(&customer.name, ch.amount_cents, &ch.url);

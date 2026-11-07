@@ -1,9 +1,10 @@
 use super::View;
+use super::theme::{self, Btn};
 use super::dialogs::{CustomerForm, Outcome, TransactionForm};
 use crate::db::{Customer, Kind, Transaction};
 use crate::money::format_cents;
 use crate::services::Services;
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 use egui_phosphor::regular as icon;
 
 #[derive(Default)]
@@ -27,8 +28,8 @@ impl CustomersView {
 
 fn balance_text(cents: i64) -> RichText {
     match cents {
-        c if c > 0 => RichText::new(format!("Deve {}", format_cents(c))).color(Color32::from_rgb(200, 60, 60)),
-        c if c < 0 => RichText::new(format!("Crédito {}", format_cents(-c))).color(Color32::from_rgb(40, 150, 80)),
+        c if c > 0 => RichText::new(format!("Deve {}", format_cents(c))).color(theme::DANGER),
+        c if c < 0 => RichText::new(format!("Crédito {}", format_cents(-c))).color(theme::SUCCESS),
         _ => RichText::new("Em dia"),
     }
 }
@@ -42,7 +43,7 @@ impl View for CustomersView {
         ui.horizontal(|ui| {
             ui.heading(format!("{}  Clientes", icon::USERS));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(format!("{}  Novo cliente", icon::USER_PLUS)).clicked() {
+                if ui.add(Btn::primary(format!("{}  Novo cliente", icon::USER_PLUS))).clicked() {
                     self.customer_form = Some(CustomerForm::default());
                 }
             });
@@ -87,34 +88,19 @@ impl View for CustomersView {
             ui.label(format!("{} {}    {} {}", icon::PHONE, or_dash(&c.phone), icon::ENVELOPE_SIMPLE, or_dash(&c.email)));
             ui.label(balance_text(c.balance_cents).size(18.0));
             ui.horizontal_wrapped(|ui| {
-                if ui.button(format!("{}  Adicionar dívida", icon::ARROW_UP)).clicked() {
+                if ui.add(Btn::secondary(format!("{}  Adicionar dívida", icon::ARROW_UP))).clicked() {
                     self.tx_form = Some(TransactionForm::for_customer(c.id, Kind::Debt));
                 }
-                if ui.button(format!("{}  Adicionar pagamento", icon::ARROW_DOWN)).clicked() {
+                if ui.add(Btn::primary(format!("{}  Adicionar pagamento", icon::ARROW_DOWN))).clicked() {
                     self.tx_form = Some(TransactionForm::for_customer(c.id, Kind::Payment));
-                }
-                if c.telegram_chat_id.is_some() {
-                    ui.colored_label(Color32::from_rgb(40, 150, 80), format!("{}  Telegram vinculado", icon::CHECK_CIRCLE));
-                } else if let Some(bot) = sv.channels.telegram.username() {
-                    if ui.button(format!("{}  Copiar link do Telegram", icon::TELEGRAM_LOGO)).clicked() {
-                        match sv.db.ensure_telegram_link_code(c.id) {
-                            Ok(code) => {
-                                ui.ctx().copy_text(format!("https://t.me/{bot}?start={code}"));
-                                sv.notify("Link copiado. Envie ao cliente para ele vincular o Telegram.");
-                            }
-                            Err(e) => sv.notify(e.to_string()),
-                        }
-                    }
-                } else {
-                    ui.label(format!("{}  Telegram: configure o bot em Canais.", icon::TELEGRAM_LOGO));
                 }
             });
             ui.separator();
             egui::ScrollArea::vertical().id_salt("history").auto_shrink(false).show(ui, |ui| {
                 for t in &self.history {
                     let (label, glyph, color, sign) = match t.kind {
-                        Kind::Debt => ("Dívida", icon::ARROW_UP, Color32::from_rgb(200, 60, 60), "+"),
-                        Kind::Payment => ("Pagamento", icon::ARROW_DOWN, Color32::from_rgb(40, 150, 80), "-"),
+                        Kind::Debt => ("Dívida", icon::ARROW_UP, theme::DANGER, "+"),
+                        Kind::Payment => ("Pagamento", icon::ARROW_DOWN, theme::SUCCESS, "-"),
                     };
                     ui.horizontal(|ui| {
                         ui.label(&t.created_at);
