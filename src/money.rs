@@ -31,6 +31,11 @@ pub fn parse_cents(input: &str) -> Option<i64> {
     reais.checked_mul(100)?.checked_add(cents)
 }
 
+/// Centavos como texto editável ("1234,56"), sem símbolo nem separador de milhar.
+pub fn format_plain(cents: i64) -> String {
+    format!("{},{:02}", cents / 100, cents % 100)
+}
+
 /// Formata centavos como "R$ 1.234,56".
 pub fn format_cents(cents: i64) -> String {
     let sign = if cents < 0 { "-" } else { "" };
@@ -61,6 +66,12 @@ mod tests {
         assert_eq!(parse_cents("1.000"), Some(100000));
         assert_eq!(parse_cents("abc"), None);
         assert_eq!(parse_cents(""), None);
+    }
+
+    #[test]
+    fn plain_roundtrips_through_parse() {
+        assert_eq!(format_plain(123456), "1234,56");
+        assert_eq!(parse_cents(&format_plain(5)), Some(5));
     }
 
     #[test]

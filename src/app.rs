@@ -102,7 +102,7 @@ impl eframe::App for App {
             ui.heading("Gestor de Crédito");
             ui.add_space(16.0);
             for s in Section::ALL {
-                let button = egui::Button::new(egui::RichText::new(s.label()).size(16.0))
+                let button = egui::Button::new(egui::RichText::new(format!("{}  {}", s.icon(), s.label())).size(16.0))
                     .selected(self.section == s)
                     .min_size(egui::vec2(ui.available_width(), 38.0));
                 if ui.add(button).clicked() && self.section != s {
@@ -125,26 +125,8 @@ impl eframe::App for App {
         });
 
         egui::CentralPanel::default().show(ui, |ui| {
-            enlarge_controls(ui.style_mut());
+            crate::ui::enlarge_controls(ui.style_mut());
             self.view.ui(ui, &mut self.services);
         });
-    }
-}
-
-/// Controles maiores na área de conteúdo (o sidebar mantém o tamanho padrão).
-fn enlarge_controls(style: &mut egui::Style) {
-    use egui::{FontId, TextStyle};
-    style.spacing.interact_size = egui::vec2(60.0, 40.0);
-    style.spacing.button_padding = egui::vec2(16.0, 9.0);
-    style.spacing.item_spacing = egui::vec2(10.0, 10.0);
-    style.spacing.combo_width = 260.0;
-    style.spacing.icon_width = 22.0;
-    for (text_style, size) in [
-        (TextStyle::Body, 17.0),
-        (TextStyle::Button, 17.0),
-        (TextStyle::Small, 14.0),
-        (TextStyle::Heading, 26.0),
-    ] {
-        style.text_styles.insert(text_style, FontId::proportional(size));
     }
 }

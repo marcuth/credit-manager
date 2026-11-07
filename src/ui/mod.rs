@@ -4,6 +4,7 @@
 mod billing_view;
 mod channels_view;
 mod customers_view;
+mod dialogs;
 mod transactions_view;
 
 use crate::services::Services;
@@ -18,6 +19,16 @@ pub enum Section {
 
 impl Section {
     pub const ALL: [Section; 4] = [Section::Transactions, Section::Customers, Section::Billing, Section::Channels];
+
+    pub fn icon(self) -> &'static str {
+        use egui_phosphor::regular as i;
+        match self {
+            Section::Transactions => i::ARROWS_LEFT_RIGHT,
+            Section::Customers => i::USERS,
+            Section::Billing => i::RECEIPT,
+            Section::Channels => i::PLUGS_CONNECTED,
+        }
+    }
 
     pub fn label(self) -> &'static str {
         match self {
@@ -59,4 +70,22 @@ pub fn customer_combo(
             ui.selectable_value(selected, Some(c.id), &c.name);
         }
     });
+}
+
+/// Controles maiores na área de conteúdo e nos diálogos (o sidebar mantém o tamanho padrão).
+pub fn enlarge_controls(style: &mut eframe::egui::Style) {
+    use eframe::egui::{FontId, TextStyle, vec2};
+    style.spacing.interact_size = vec2(60.0, 40.0);
+    style.spacing.button_padding = vec2(16.0, 9.0);
+    style.spacing.item_spacing = vec2(10.0, 10.0);
+    style.spacing.combo_width = 260.0;
+    style.spacing.icon_width = 22.0;
+    for (text_style, size) in [
+        (TextStyle::Body, 17.0),
+        (TextStyle::Button, 17.0),
+        (TextStyle::Small, 14.0),
+        (TextStyle::Heading, 26.0),
+    ] {
+        style.text_styles.insert(text_style, FontId::proportional(size));
+    }
 }
