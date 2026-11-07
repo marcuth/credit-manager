@@ -6,11 +6,20 @@ license = "MIT"
 authors = ["Marcuth <me@marcuth.dev>"]
 
 [dependencies]
+argon2 = { version = "0.6.0", default-features = false, features = ["alloc"] }
+base64 = { version = "0.23.1", default-features = false, features = ["std"] }
+chacha20poly1305 = { version = "0.11.0", default-features = false, features = ["alloc"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts"] }
 egui-pop-phosphor = "0.15.0"
+getrandom = { version = "0.4.3", default-features = false }
+grammers-client = "0.11.0"
+grammers-session = { version = "0.11.0", default-features = false, features = ["serde"] }
 qrcode = "0.14.1"
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["backup", "bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+sha2 = "0.11.1"
 thiserror = "2.0.21"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 ureq = { version = "3.5.1", features = ["json"] }
@@ -22,3 +31,10 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Menos informação de debug: o build de desenvolvimento enchia o disco (PDBs de centenas de MB).
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

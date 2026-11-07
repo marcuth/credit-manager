@@ -19,6 +19,12 @@ pub enum ChannelStatus {
     Connecting,
     /// WhatsApp aguardando o aparelho ler este QR code.
     WaitingQr(String),
+    /// Telegram conectado ao servidor, mas sem login: falta informar o celular.
+    NeedsLogin,
+    /// Telegram: o código de login foi pedido e falta digitá-lo.
+    AwaitingCode,
+    /// Telegram: a conta tem verificação em duas etapas; falta a senha (com a dica, se houver).
+    AwaitingPassword(Option<String>),
     Ready,
     Error(String),
 }
@@ -80,7 +86,7 @@ impl Channels {
     pub fn new(data_dir: &Path) -> std::io::Result<Self> {
         Ok(Self {
             whatsapp: Arc::new(WhatsAppChannel::new(data_dir.join("whatsapp.db"))?),
-            telegram: Arc::new(TelegramChannel::new()),
+            telegram: Arc::new(TelegramChannel::new(data_dir.join("telegram.session"))?),
         })
     }
 
